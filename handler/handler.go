@@ -4,17 +4,19 @@ import (
 	"SQLCollector/util"
 	"errors"
 	"fmt"
-	"github.com/go-mysql-org/go-mysql/client"
+	qsql "github.com/QWERKael/utility-go/database/mysql"
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/siddontang/go-log/log"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 func NewHandler() Handler {
 	h := Handler{
 		Connecting:   make([]string, 0),
 		ConnectNames: []string{"all"},
-		ConnectPool:  make(map[string]*client.Conn, 0),
+		ConnectPool:  make(map[string]*qsql.Connector, 0),
 	}
 	return h
 }
@@ -22,15 +24,22 @@ func NewHandler() Handler {
 type Handler struct {
 	Connecting   []string
 	ConnectNames []string
-	ConnectPool  map[string]*client.Conn
+	ConnectPool  map[string]*qsql.Connector
 }
 
-func (h *Handler) AddConnect(region, addr, user, password, dbName string) error {
+func (h *Handler) AddConnect(region, host, port, user, password, dbName string) error {
 	if region == "all" {
 		h.ConnectNames = append(h.ConnectNames, region)
 		return nil
 	}
-	connect, err := client.Connect(addr, user, password, dbName)
+	//connect, err := client.Connect(addr, user, password, dbName)
+	connect := &qsql.Connector{}
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		util.SugarLogger.Errorf("端口错误: %s\n", err.Error())
+		return err
+	}
+	err = connect.Connect(user, password, "tcp", host, portInt, dbName)
 	if err != nil {
 		return err
 	}
@@ -61,6 +70,46 @@ func (h *Handler) UseDB(dbName string) error {
 }
 func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 	util.SugarLogger.Debugf("查询命令: %s\n", query)
+	switch query {
+	case "show databases":
+		fallthrough
+	case "show dbs":
+		values := make([][]interface{}, 0)
+		for _, connectName := range h.ConnectNames {
+			values = append(values, []interface{}{connectName})
+		}
+		rs, err := mysql.BuildSimpleTextResultset([]string{"connects"}, values)
+		if err != nil {
+			return nil, err
+		}
+		return &mysql.Result{
+			Status:       34,
+			Warnings:     0,
+			InsertId:     0,
+			AffectedRows: 0,
+			Resultset:    rs,
+		}, nil
+	case "show using":
+		util.SugarLogger.Debugf("查看正在使用的数据源")
+		values := make([][]interface{}, 0)
+		for _, connectName := range h.Connecting {
+			values = append(values, []interface{}{connectName})
+		}
+		rs, err := mysql.BuildSimpleTextResultset([]string{"connecting"}, values)
+		if err != nil {
+			util.SugarLogger.Errorf("查看正在使用的数据源出现错误：%s", err.Error())
+			return nil, err
+		}
+		util.SugarLogger.Debugf("正在使用的数据源有：%s", strings.Join(h.Connecting, ", "))
+		util.SugarLogger.Debugf("%#v", rs)
+		return &mysql.Result{
+			Status:       34,
+			Warnings:     0,
+			InsertId:     0,
+			AffectedRows: 0,
+			Resultset:    rs,
+		}, nil
+	}
 	return h.Query(query, util.WithSource)
 }
 
@@ -85,115 +134,97 @@ func (h Handler) HandleOtherCommand(cmd byte, data []byte) error {
 	)
 }
 
-func row2interfaces(fvs []mysql.FieldValue, source *string) []interface{} {
-	rowInterface := make([]interface{}, 0)
-	if source != nil {
-		rowInterface = append(rowInterface, *source)
-	}
-	for _, fv := range fvs {
-		switch fv.Type {
-		case mysql.FieldValueTypeUnsigned:
-			rowInterface = append(rowInterface, fmt.Sprintf("%d", fv.AsUint64()))
-		case mysql.FieldValueTypeSigned:
-			rowInterface = append(rowInterface, fmt.Sprintf("%d", fv.AsInt64()))
-		case mysql.FieldValueTypeFloat:
-			rowInterface = append(rowInterface, fmt.Sprintf("%f", fv.AsFloat64()))
-		case mysql.FieldValueTypeString:
-			rowInterface = append(rowInterface, fmt.Sprintf("%s", fv.AsString()))
-		default: // FieldValueTypeNull
-			rowInterface = append(rowInterface, nil)
-		}
-	}
-	return rowInterface
+type queryResult struct {
+	db     string
+	names  []string
+	values []map[string]string
 }
 
 func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
-	switch query {
-	case "show databases":
-		fallthrough
-	case "show dbs":
-		values := make([][]interface{}, 0)
-		for _, connectName := range h.ConnectNames {
-			values = append(values, []interface{}{connectName})
-		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"connects"}, values)
-		if err != nil {
-			return nil, err
-		}
-		return &mysql.Result{
-			Status:       34,
-			Warnings:     0,
-			InsertId:     0,
-			AffectedRows: 0,
-			Resultset:    rs,
-		}, nil
-	case "show using":
-		values := make([][]interface{}, 0)
-		for _, connectName := range h.Connecting {
-			values = append(values, []interface{}{connectName})
-		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"connecting"}, values)
-		if err != nil {
-			return nil, err
-		}
-		return &mysql.Result{
-			Status:       34,
-			Warnings:     0,
-			InsertId:     0,
-			AffectedRows: 0,
-			Resultset:    rs,
-		}, nil
-	}
 	//进行聚合查询
+	util.SugarLogger.Debugf("开始进行聚合查询：%s", query)
 	collectNames := make([]string, 0)
 	collectValues := make([][]interface{}, 0)
+	queryResultChannel := make(chan *queryResult, len(h.Connecting))
+
+	var wg sync.WaitGroup
 	for _, db := range h.Connecting {
-		source := db
-		util.SugarLogger.Debugf("查询数据库：%s", db)
-		r, err := h.ConnectPool[db].Execute(query)
-		if err != nil {
-			return nil, err
-		}
-
-		//如果当前连接查询出来的结果是空集，则跳过
-		if len(r.Resultset.Values) == 0 {
-			util.SugarLogger.Debugf("当前连接[%s]查询出来的结果是空集，跳过", source)
-			continue
-		}
-
-		colCount := len(r.Resultset.Values[0])
-		names := make([]string, colCount)
-
-		//处理表头
-		//如果表头是空的，就初始化表头；否则，校验表头
-		for name, i := range r.Resultset.FieldNames {
-			util.SugarLogger.Debugf("name: %s\n", name)
-			names[i] = name
-		}
-		if len(collectNames) == 0 {
-			collectNames = names
-		} else if len(collectNames) != len(names) {
-			return nil, errors.New("可能存在异构表结构")
-		} else {
-			for i, name := range names {
-				if collectNames[i] != name {
-					return nil, errors.New("可能存在异构表结构")
-				}
+		util.SugarLogger.Debugf("发布查询任务到：%s", db)
+		wg.Add(1)
+		go func(db string) {
+			util.SugarLogger.Debugf("查询数据库：%s", db)
+			r, names, err := h.ConnectPool[db].QueryAsMapStringListWithColNames(query)
+			if err != nil {
+				return
 			}
-		}
 
-		//处理数据行
-		for _, row := range r.Resultset.Values {
-			if withSource {
-				collectValues = append(collectValues, row2interfaces(row, &source))
-			} else {
-				collectValues = append(collectValues, row2interfaces(row, nil))
+			//如果当前连接查询出来的结果是空集，则跳过
+			if len(r) == 0 {
+				util.SugarLogger.Debugf("当前连接[%s]查询出来的结果是空集，跳过", db)
+				wg.Done()
+				return
 			}
-		}
+			queryResultChannel <- &queryResult{
+				db:     db,
+				names:  names,
+				values: r,
+			}
+			return
+		}(db)
 	}
+	util.SugarLogger.Debugf("查询任务已发布")
 
+	var namesErr error
+	namesErr = nil
+	go func() {
+		util.SugarLogger.Debugf("开始组装任务")
+		length := 0
+		var collectNamesSet *util.Set
+		for qr := range queryResultChannel {
+			util.SugarLogger.Debugf("开始组装[%s]数据", qr.db)
+			//初始化表头，或者校验表头
+			namesSet := util.NewSet(qr.names)
+			if namesSet == nil {
+				continue
+			}
+			if collectNamesSet == nil {
+				collectNames = qr.names
+				collectNamesSet = namesSet
+				length = len(collectNames)
+			}
+			if length != len(qr.names) || !collectNamesSet.Equal(namesSet) {
+				namesErr = errors.New(fmt.Sprintf("可能存在异构表结构: \n%d != %d\n或者\n%#v\n%#v", length, len(qr.names), collectNamesSet, namesSet))
+				break
+			}
+			//拼接数据
+			for _, row := range qr.values {
+				collectRow := make([]interface{}, 0)
+				if withSource {
+					collectRow = []interface{}{qr.db}
+				}
+				for _, name := range collectNames {
+					cell := row[name]
+					if cell == "" {
+						cell = " "
+					}
+					collectRow = append(collectRow, cell)
+					util.SugarLogger.Debugf("组装collectRow:%s:%s", name, cell)
+				}
+				collectValues = append(collectValues, collectRow)
+			}
+			util.SugarLogger.Debugf("数据源[%s]的数据已组装完成", qr.db)
+			wg.Done()
+		}
+	}()
+
+	wg.Wait()
+	util.SugarLogger.Debugf("所有数据源的数据都已组装完成")
 	if withSource {
 		collectNames = append([]string{"source"}, collectNames...)
+	}
+	if namesErr != nil {
+		util.SugarLogger.Debugf("组装数据报错: %s", namesErr.Error())
+		return nil, namesErr
 	}
 
 	//将结果组装成指定格式
