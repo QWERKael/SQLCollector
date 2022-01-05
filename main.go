@@ -3,10 +3,10 @@ package main
 import (
 	"SQLCollector/handler"
 	"SQLCollector/util"
-	"fmt"
 	"github.com/QWERKael/utility-go/codec"
 	"github.com/go-mysql-org/go-mysql/server"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -25,6 +25,12 @@ func main() {
 	util.DBConfig, _ = codec.DecodeIniAllSection(util.DBConfigPath)
 	l, _ := net.Listen("tcp", util.ServerConfig["server"]["addr"])
 	util.SugarLogger.Infof("listening for %s", util.ServerConfig["server"]["addr"])
+	whiteList := strings.Split(util.ServerConfig["server"]["whitelist"], ",")
+	for i := range whiteList {
+		whiteList[i] = strings.TrimSpace(whiteList[i])
+	}
+	whiteSet := util.NewSet(whiteList)
+	util.SugarLogger.Debugf("白名单列表：%s", whiteSet.ToStringList())
 	// user either the in-memory credential provider or the remote credential provider (you can implement your own)
 	//inMemProvider := server.NewInMemoryProvider()
 	//inMemProvider.AddUser("root", "123")
@@ -34,6 +40,13 @@ func main() {
 	//var tlsConf = server.NewServerTLSConfig(test_keys.CaPem, test_keys.CertPem, test_keys.KeyPem, tls.VerifyClientCertIfGiven)
 	for {
 		c, _ := l.Accept()
+		remoteAddr := c.RemoteAddr().String()
+		util.SugarLogger.Infof("接受到【%s】的连接", remoteAddr)
+		remoteIp := strings.Split(remoteAddr, ":")[0]
+		if !whiteSet.Exists(remoteIp) {
+			c.Close()
+			continue
+		}
 		go func() {
 			// Create a connection with user root and an empty password.
 			// You can use your own handler to handle command here.
@@ -43,7 +56,7 @@ func main() {
 				if region == "DEFAULT" {
 					continue
 				}
-				err := h.AddConnect(region, fmt.Sprintf("%s:%s", section["host"], section["port"]), section["user"], section["password"], section["database"])
+				err := h.AddConnect(region, section["host"], section["port"], section["user"], section["password"], section["database"])
 				if err != nil {
 					util.SugarLogger.Errorf("添加[%s]连接失败：%s", region, err.Error())
 				}

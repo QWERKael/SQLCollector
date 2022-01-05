@@ -65,3 +65,11 @@ func (s *Set) Equal(t *Set) bool {
 	}
 	return true
 }
+
+func (s *Set) ToStringList() []string {
+	list := make([]string, 0)
+	for k, _ := range s.inner {
+		list = append(list, k)
+	}
+	return list
+}
