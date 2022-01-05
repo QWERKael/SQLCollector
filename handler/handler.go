@@ -138,6 +138,7 @@ type queryResult struct {
 	db     string
 	names  []string
 	values []map[string]string
+	err    error
 }
 
 func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
@@ -155,9 +156,15 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 			util.SugarLogger.Debugf("查询数据库：%s", db)
 			r, names, err := h.ConnectPool[db].QueryAsMapStringListWithColNames(query)
 			if err != nil {
+				util.SugarLogger.Errorf("当前连接[%s]查询出来的结果报错：%s", db, err.Error())
+				queryResultChannel <- &queryResult{
+					db:     db,
+					names:  nil,
+					values: nil,
+					err:    err,
+				}
 				return
 			}
-
 			//如果当前连接查询出来的结果是空集，则跳过
 			if len(r) == 0 {
 				util.SugarLogger.Debugf("当前连接[%s]查询出来的结果是空集，跳过", db)
@@ -168,6 +175,7 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 				db:     db,
 				names:  names,
 				values: r,
+				err:    nil,
 			}
 			return
 		}(db)
@@ -176,15 +184,31 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 
 	var namesErr error
 	namesErr = nil
+	errStr := ""
+	catchErr := false
 	go func() {
 		util.SugarLogger.Debugf("开始组装任务")
 		length := 0
 		var collectNamesSet *util.Set
 		for qr := range queryResultChannel {
 			util.SugarLogger.Debugf("开始组装[%s]数据", qr.db)
+			//校验是否有报错
+			if qr.err != nil {
+				util.SugarLogger.Errorf("当前连接[%s]查询出来的结果报错：%s", qr.db, qr.err.Error())
+				errStr += fmt.Sprintf("[%s] get query error: %s\n", qr.db, qr.err.Error())
+				catchErr = true
+			}
+			//只要一组数据中有一个报错，后续数据就不再组装，只尽可能多的收集错误信息
+			if catchErr {
+				util.SugarLogger.Debugf("本次查询出现错误，跳过数据组装")
+				wg.Done()
+				continue
+			}
 			//初始化表头，或者校验表头
 			namesSet := util.NewSet(qr.names)
 			if namesSet == nil {
+				util.SugarLogger.Debugf("[%s]表头为空", qr.db)
+				wg.Done()
 				continue
 			}
 			if collectNamesSet == nil {
@@ -193,8 +217,10 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 				length = len(collectNames)
 			}
 			if length != len(qr.names) || !collectNamesSet.Equal(namesSet) {
+				util.SugarLogger.Errorf("可能存在异构表结构: \n%d != %d\n或者\n%#v\n%#v", length, len(qr.names), collectNamesSet, namesSet)
 				namesErr = errors.New(fmt.Sprintf("可能存在异构表结构: \n%d != %d\n或者\n%#v\n%#v", length, len(qr.names), collectNamesSet, namesSet))
-				break
+				wg.Done()
+				continue
 			}
 			//拼接数据
 			for _, row := range qr.values {
@@ -218,13 +244,17 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 	}()
 
 	wg.Wait()
-	util.SugarLogger.Debugf("所有数据源的数据都已组装完成")
-	if withSource {
-		collectNames = append([]string{"source"}, collectNames...)
+	if catchErr {
+		return nil, errors.New(errStr)
 	}
+
 	if namesErr != nil {
 		util.SugarLogger.Debugf("组装数据报错: %s", namesErr.Error())
 		return nil, namesErr
+	}
+	util.SugarLogger.Debugf("所有数据源的数据都已组装完成")
+	if withSource {
+		collectNames = append([]string{"source"}, collectNames...)
 	}
 
 	//将结果组装成指定格式
