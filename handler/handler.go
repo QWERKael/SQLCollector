@@ -7,7 +7,6 @@ import (
 	qsql "github.com/QWERKael/utility-go/database/mysql"
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/siddontang/go-log/log"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -27,19 +26,14 @@ type Handler struct {
 	ConnectPool  map[string]*qsql.Connector
 }
 
-func (h *Handler) AddConnect(region, host, port, user, password, dbName string) error {
+func (h *Handler) AddConnect(region, host string, port int, user, password, dbName string) error {
 	if region == "all" {
 		h.ConnectNames = append(h.ConnectNames, region)
 		return nil
 	}
 	//connect, err := client.Connect(addr, user, password, dbName)
 	connect := &qsql.Connector{}
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		util.SugarLogger.Errorf("端口错误: %s\n", err.Error())
-		return err
-	}
-	err = connect.Connect(user, password, "tcp", host, portInt, dbName)
+	err := connect.Connect(user, password, "tcp", host, port, dbName)
 	if err != nil {
 		return err
 	}

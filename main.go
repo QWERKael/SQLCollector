@@ -3,7 +3,6 @@ package main
 import (
 	"SQLCollector/handler"
 	"SQLCollector/util"
-	"github.com/QWERKael/utility-go/codec"
 	"github.com/go-mysql-org/go-mysql/server"
 	"net"
 	"strings"
@@ -21,22 +20,24 @@ func (m *RemoteThrottleProvider) GetCredential(username string) (password string
 }
 
 func main() {
-	util.ServerConfig, _ = codec.DecodeIniAllSection(util.ServerConfigPath)
-	util.DBConfig, _ = codec.DecodeIniAllSection(util.DBConfigPath)
-	l, _ := net.Listen("tcp", util.ServerConfig["server"]["addr"])
-	util.SugarLogger.Infof("listening for %s", util.ServerConfig["server"]["addr"])
-	whiteList := strings.Split(util.ServerConfig["server"]["whitelist"], ",")
-	for i := range whiteList {
-		whiteList[i] = strings.TrimSpace(whiteList[i])
+	//加载配置文件
+	var err error
+	util.SugarLogger.Debugf("加载配置文件：%s", util.ConfigPath)
+	util.Config, err = util.ParseConfigFromToml(util.ConfigPath)
+	if err != nil {
+		util.SugarLogger.Errorf("加载配置文件错误：%s", err.Error())
 	}
-	whiteSet := util.NewSet(whiteList)
+	//开始监听
+	l, _ := net.Listen("tcp", util.Config.Server.Addr)
+	util.SugarLogger.Infof("listening for %s", util.Config.Server.Addr)
+	whiteSet := util.NewSet(util.Config.Server.WhiteList)
 	util.SugarLogger.Debugf("白名单列表：%s", whiteSet.ToStringList())
 	// user either the in-memory credential provider or the remote credential provider (you can implement your own)
 	//inMemProvider := server.NewInMemoryProvider()
 	//inMemProvider.AddUser("root", "123")
 
 	remoteProvider := &RemoteThrottleProvider{server.NewInMemoryProvider(), 10 + 50}
-	remoteProvider.AddUser(util.ServerConfig["server"]["user"], util.ServerConfig["server"]["password"])
+	remoteProvider.AddUser(util.Config.Server.User, util.Config.Server.Password)
 	//var tlsConf = server.NewServerTLSConfig(test_keys.CaPem, test_keys.CertPem, test_keys.KeyPem, tls.VerifyClientCertIfGiven)
 	for {
 		c, _ := l.Accept()
@@ -52,13 +53,10 @@ func main() {
 			// You can use your own handler to handle command here.
 			svr := server.NewDefaultServer()
 			h := handler.NewHandler()
-			for region, section := range util.DBConfig {
-				if region == "DEFAULT" {
-					continue
-				}
-				err := h.AddConnect(region, section["host"], section["port"], section["user"], section["password"], section["database"])
+			for _, source := range util.Config.Source {
+				err := h.AddConnect(source.Name, source.Host, source.Port, source.User, source.Password, source.Database)
 				if err != nil {
-					util.SugarLogger.Errorf("添加[%s]连接失败：%s", region, err.Error())
+					util.SugarLogger.Errorf("添加[%s]连接失败：%s", source.Name, err.Error())
 				}
 			}
 			conn, err := server.NewCustomizedConn(c, svr, remoteProvider, &h)
