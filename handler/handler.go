@@ -26,32 +26,27 @@ type Handler struct {
 	ConnectPool  map[string]*qsql.Connector
 }
 
-func (h *Handler) AddConnect(region, host string, port int, user, password, dbName string) error {
-	if region == "all" {
-		h.ConnectNames = append(h.ConnectNames, region)
-		return nil
-	}
+func (h *Handler) AddConnect(sourceName, host string, port int, user, password, dbName string) error {
 	//connect, err := client.Connect(addr, user, password, dbName)
 	connect := &qsql.Connector{}
 	err := connect.Connect(user, password, "tcp", host, port, dbName)
 	if err != nil {
 		return err
 	}
-	h.ConnectNames = append(h.ConnectNames, region)
-	h.ConnectPool[region] = connect
+	h.ConnectNames = append(h.ConnectNames, sourceName)
+	h.ConnectPool[sourceName] = connect
 	return nil
 }
 
 func (h *Handler) UseDB(dbName string) error {
-	if dbName == "all" {
-		dbName = strings.Join(h.ConnectNames, ",")
+	for _, group := range util.Config.Group {
+		if group.Name == dbName {
+			dbName = strings.Join(group.SourceList, ",")
+		}
 	}
 	util.SugarLogger.Debugf("use dbName: %s", dbName)
 	var dbList []string
 	for _, db := range strings.Split(dbName, ",") {
-		if db == "all" {
-			continue
-		}
 		if _, ok := h.ConnectPool[db]; !ok {
 			log.Errorf("未知的数据库：%s", db)
 			return nil
@@ -73,6 +68,24 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 			values = append(values, []interface{}{connectName})
 		}
 		rs, err := mysql.BuildSimpleTextResultset([]string{"connects"}, values)
+		if err != nil {
+			return nil, err
+		}
+		return &mysql.Result{
+			Status:       34,
+			Warnings:     0,
+			InsertId:     0,
+			AffectedRows: 0,
+			Resultset:    rs,
+		}, nil
+	case "show groups":
+		fallthrough
+	case "show gps":
+		values := make([][]interface{}, 0)
+		for _, group := range util.Config.Group {
+			values = append(values, []interface{}{group.Name, strings.Join(group.SourceList, ", ")})
+		}
+		rs, err := mysql.BuildSimpleTextResultset([]string{"group name", "source list"}, values)
 		if err != nil {
 			return nil, err
 		}

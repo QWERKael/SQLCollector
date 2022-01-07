@@ -8,6 +8,7 @@ import (
 type Conf struct {
 	Server ServerConf   `toml:"server"`
 	Source []SourceConf `toml:"source"`
+	Group  []Group      `toml:"group"`
 }
 
 type ServerConf struct {
@@ -31,6 +32,11 @@ type SourceConf struct {
 type ViewConf struct {
 	Name string `toml:"name"`
 	SQL  string `toml:"sql"`
+}
+
+type Group struct {
+	Name       string   `toml:"name"`
+	SourceList []string `toml:"sourcelist"`
 }
 
 func ParseConfigFromToml(path string) (*Conf, error) {
