@@ -2,6 +2,7 @@ package handler
 
 import (
 	"SQLCollector/util"
+	"SQLCollector/view"
 	"fmt"
 	qsql "github.com/QWERKael/utility-go/database/mysql"
 	"github.com/go-mysql-org/go-mysql/mysql"
@@ -9,11 +10,17 @@ import (
 	"strings"
 )
 
+type DataSource struct {
+	Name  string
+	Conn  *qsql.Connector
+	Views *view.Views
+}
+
 func NewHandler() Handler {
 	h := Handler{
 		Connecting:   make([]string, 0),
 		ConnectNames: make([]string, 0),
-		ConnectPool:  make(map[string]*qsql.Connector, 0),
+		ConnectPool:  make(map[string]DataSource, 0),
 	}
 	return h
 }
@@ -21,18 +28,29 @@ func NewHandler() Handler {
 type Handler struct {
 	Connecting   []string
 	ConnectNames []string
-	ConnectPool  map[string]*qsql.Connector
+	ConnectPool  map[string]DataSource
 }
 
-func (h *Handler) AddConnect(sourceName, host string, port int, user, password, dbName string) error {
+func (h *Handler) AddConnect(source util.SourceConf) error {
 	//connect, err := client.Connect(addr, user, password, dbName)
 	connect := &qsql.Connector{}
-	err := connect.Connect(user, password, "tcp", host, port, dbName)
+	err := connect.Connect(source.User, source.Password, "tcp", source.Host, source.Port, source.Database)
 	if err != nil {
 		return err
 	}
-	h.ConnectNames = append(h.ConnectNames, sourceName)
-	h.ConnectPool[sourceName] = connect
+	views := view.NewViews()
+	for _, viewConf := range source.View {
+		err := views.Add(viewConf.Name, viewConf.SQL, nil)
+		if nil != err {
+			return err
+		}
+	}
+	h.ConnectNames = append(h.ConnectNames, source.Name)
+	h.ConnectPool[source.Name] = DataSource{
+		Name:  source.Name,
+		Conn:  connect,
+		Views: views,
+	}
 	return nil
 }
 
@@ -56,7 +74,7 @@ func (h *Handler) UseDB(dbName string) error {
 	return nil
 }
 func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
-	util.SugarLogger.Debugf("查询命令: %s\n", query)
+	util.SugarLogger.Debugf("接受到的查询命令: %s\n", query)
 	switch query {
 	case "show databases":
 		fallthrough

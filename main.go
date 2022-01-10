@@ -54,7 +54,7 @@ func main() {
 			svr := server.NewDefaultServer()
 			h := handler.NewHandler()
 			for _, source := range util.Config.Source {
-				err := h.AddConnect(source.Name, source.Host, source.Port, source.User, source.Password, source.Database)
+				err := h.AddConnect(source)
 				if err != nil {
 					util.SugarLogger.Errorf("添加[%s]连接失败：%s", source.Name, err.Error())
 				}

@@ -2,9 +2,9 @@ package handler
 
 import (
 	"SQLCollector/util"
+	"SQLCollector/view"
 	"errors"
 	"fmt"
-	qsql "github.com/QWERKael/utility-go/database/mysql"
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"sync"
 )
@@ -127,9 +127,26 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 }
 
 // 在单连接上进行查询
-func singleQuery(conn *qsql.Connector, db, query string, queryResultChannel chan<- *queryResult, wg *sync.WaitGroup) {
+func singleQuery(dataSource DataSource, db, query string, queryResultChannel chan<- *queryResult, wg *sync.WaitGroup) {
 	util.SugarLogger.Debugf("查询数据库：%s", db)
-	r, names, err := conn.QueryAsMapStringListWithColNames(query)
+	//进行view替换
+	var err error
+	query, err = view.ReplaceViews(query, dataSource.Views)
+	if err != nil {
+		util.SugarLogger.Errorf("当前连接[%s]view替换报错：%s", db, err.Error())
+		queryResultChannel <- &queryResult{
+			db:     db,
+			names:  nil,
+			values: nil,
+			err:    err,
+		}
+		return
+	}
+	util.SugarLogger.Debugf("执行查询命令: %s\n", query)
+	//执行查询
+	var r []map[string]string
+	var names []string
+	r, names, err = dataSource.Conn.QueryAsMapStringListWithColNames(query)
 	if err != nil {
 		util.SugarLogger.Errorf("当前连接[%s]查询出来的结果报错：%s", db, err.Error())
 		queryResultChannel <- &queryResult{
