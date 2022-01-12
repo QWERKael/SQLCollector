@@ -112,6 +112,28 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 			AffectedRows: 0,
 			Resultset:    rs,
 		}, nil
+		fallthrough
+	case "show views":
+		values := make([][]interface{}, 0)
+		using := util.NewSet(h.Connecting)
+		for _, sourceConf := range util.Config.Source {
+			if using.Exists(sourceConf.Name) {
+				for _, viewConf := range sourceConf.View {
+					values = append(values, []interface{}{sourceConf.Name, viewConf.Name, viewConf.SQL})
+				}
+			}
+		}
+		rs, err := mysql.BuildSimpleTextResultset([]string{"source", "name", "description"}, values)
+		if err != nil {
+			return nil, err
+		}
+		return &mysql.Result{
+			Status:       34,
+			Warnings:     0,
+			InsertId:     0,
+			AffectedRows: 0,
+			Resultset:    rs,
+		}, nil
 	case "show using":
 		util.SugarLogger.Debugf("查看正在使用的数据源")
 		values := make([][]interface{}, 0)

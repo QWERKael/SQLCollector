@@ -1,8 +1,6 @@
 package util
 
-import (
-	"flag"
-)
+import "flag"
 
 var (
 	LogLevel   string
