@@ -73,12 +73,14 @@ type View struct {
 func ReplaceViews(originSQL string, views *Views) (string, error) {
 
 	astNode, err := parse(originSQL)
+	if err != nil {
+		return "", err
+	}
 
 	(*astNode).Accept(views)
-	fmt.Println("解析结束")
 
 	buf := new(bytes.Buffer)
-	restoreCtx := format.NewRestoreCtx(format.RestoreKeyWordUppercase|format.RestoreNameBackQuotes, buf)
+	restoreCtx := format.NewRestoreCtx(format.DefaultRestoreFlags, buf)
 	err = (*astNode).Restore(restoreCtx)
 	if nil != err {
 		return "", err
