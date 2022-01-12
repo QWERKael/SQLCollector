@@ -16,6 +16,7 @@ type ServerConf struct {
 	User      string   `toml:"user"`
 	Password  string   `toml:"password"`
 	WhiteList []string `toml:"whitelist"`
+	Includes  []string `toml:"includes"`
 }
 
 type SourceConf struct {
@@ -48,6 +49,22 @@ func ParseConfigFromToml(path string) (*Conf, error) {
 	err = toml.Unmarshal(b, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(cfg.Server.Includes) > 0 {
+		for _, include := range cfg.Server.Includes {
+			ib, err := io.ReadFile(include)
+			if err != nil {
+				return nil, err
+			}
+			b = append(b, []byte("\n")...)
+			b = append(b, ib...)
+		}
+		cfg = &Conf{}
+		err = toml.Unmarshal(b, cfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
