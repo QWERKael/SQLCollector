@@ -214,6 +214,7 @@ func singleQuery(dataSource DataSource, db, query string, queryResultChannel cha
 		return
 	}
 	if decoratorConf != nil {
+		util.SugarLogger.Debugf("执行装饰器：%s", decoratorConf.Name)
 		lv := golua.NewLuaVM()
 		defer lv.L.Close()
 		lv.SetLuaPackagePath(util.Config.Server.LuaPackagePath)
@@ -224,6 +225,16 @@ func singleQuery(dataSource DataSource, db, query string, queryResultChannel cha
 		var values []lua.LValue
 		values, err = lv.ExecuteLuaScriptWithArgsAndMultiResult(decoratorConf.Path,
 			decoratorConf.Func, decoratorConf.NRet, tab, structs.ConvertStringMapToLuaTable(decoratorConf.Args))
+		if err != nil {
+			util.SugarLogger.Errorf("当前连接[%s]装饰器[%s]执行失败：%s", db, decoratorConf.Name, err.Error())
+			queryResultChannel <- &queryResult{
+				db:     db,
+				names:  nil,
+				values: nil,
+				err:    fmt.Errorf("当前连接[%s]装饰器[%s]执行失败", db, decoratorConf.Name),
+			}
+			return
+		}
 		var ok bool
 		if tab, ok = values[0].(*lua.LTable); ok {
 			ct.ConvertFromLuaTable(tab)
