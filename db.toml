@@ -3,6 +3,15 @@ addr = "0.0.0.0:3306"
 user = "root"
 password = "1234"
 whitelist = ["127.0.0.1",  "127.0.0.2", "127.0.0.3"]
+lua_package_path = "lua/module/?.lua"
+
+
+[[decorator]]
+name = "Json"
+path = "lua/decorator/json.lua"
+func = "Json"
+NRet = 1    # 返回值个数
+args = {"prefix" = "json."}
 
 [[source]]
 name = "db1"

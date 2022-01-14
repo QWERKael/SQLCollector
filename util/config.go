@@ -6,17 +6,19 @@ import (
 )
 
 type Conf struct {
-	Server ServerConf   `toml:"server"`
-	Source []SourceConf `toml:"source"`
-	Group  []Group      `toml:"group"`
+	Server    ServerConf      `toml:"server"`
+	Source    []SourceConf    `toml:"source"`
+	Group     []GroupConf     `toml:"group"`
+	Decorator []DecoratorConf `toml:"decorator"`
 }
 
 type ServerConf struct {
-	Addr      string   `toml:"addr"`
-	User      string   `toml:"user"`
-	Password  string   `toml:"password"`
-	WhiteList []string `toml:"whitelist"`
-	Includes  []string `toml:"includes"`
+	Addr           string   `toml:"addr"`
+	User           string   `toml:"user"`
+	Password       string   `toml:"password"`
+	WhiteList      []string `toml:"whitelist"`
+	Includes       []string `toml:"includes"`
+	LuaPackagePath string   `toml:"lua_package_path"`
 }
 
 type SourceConf struct {
@@ -35,9 +37,17 @@ type ViewConf struct {
 	SQL  string `toml:"sql"`
 }
 
-type Group struct {
+type GroupConf struct {
 	Name       string   `toml:"name"`
 	SourceList []string `toml:"sourcelist"`
+}
+
+type DecoratorConf struct {
+	Name string            `toml:"name"`
+	Path string            `toml:"path"`
+	Func string            `toml:"func"`
+	NRet int               `toml:"NRet"`
+	Args map[string]string `toml:"args"`
 }
 
 func ParseConfigFromToml(path string) (*Conf, error) {

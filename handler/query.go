@@ -1,11 +1,16 @@
 package handler
 
 import (
+	"SQLCollector/structs"
 	"SQLCollector/util"
 	"SQLCollector/view"
 	"errors"
 	"fmt"
+	"github.com/QWERKael/utility-go/golua"
 	"github.com/go-mysql-org/go-mysql/mysql"
+	lua "github.com/yuin/gopher-lua"
+	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -17,6 +22,27 @@ type queryResult struct {
 }
 
 func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
+	decorator := ""
+	//if query[:6] == "select" {
+	//	decorator = "Json"
+	//}
+	reg := regexp.MustCompile(`/\* (\S+) \*/`)
+	if reg == nil {
+		return nil, fmt.Errorf("装饰器匹配器为空")
+	}
+	regResult := reg.FindStringSubmatch(query)
+	if len(regResult) >= 2 {
+		decorator = regResult[1]
+	}
+	//获取decorator配置
+	var decoratorConf *util.DecoratorConf
+	decoratorConf = nil
+	for _, d := range util.Config.Decorator {
+		if d.Name == decorator {
+			decoratorConf = &d
+		}
+	}
+	util.SugarLogger.Debugf("检测到装饰器hint：%s", decorator)
 	//进行聚合查询
 	util.SugarLogger.Debugf("开始进行聚合查询：%s", query)
 	collectNames := make([]string, 0)
@@ -28,7 +54,7 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 	for _, db := range h.Connecting {
 		util.SugarLogger.Debugf("发布查询任务到：%s", db)
 		wg.Add(1)
-		go singleQuery(h.ConnectPool[db], db, query, queryResultChannel, &wg)
+		go singleQuery(h.ConnectPool[db], db, query, queryResultChannel, &wg, decoratorConf)
 	}
 	util.SugarLogger.Debugf("查询任务已发布")
 
@@ -40,7 +66,7 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 	go func() {
 		util.SugarLogger.Debugf("开始组装任务")
 		length := 0
-		var collectNamesSet *util.Set
+		var collectNamesSet *structs.Set
 		for qr := range queryResultChannel {
 			util.SugarLogger.Debugf("开始组装[%s]数据", qr.db)
 			//校验是否有报错
@@ -56,7 +82,7 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 				continue
 			}
 			//初始化表头，或者校验表头
-			namesSet := util.NewSet(qr.names)
+			namesSet := structs.NewSet(qr.names)
 			if namesSet == nil {
 				util.SugarLogger.Debugf("[%s]表头为空", qr.db)
 				wg.Done()
@@ -127,8 +153,32 @@ func (h *Handler) Query(query string, withSource bool) (*mysql.Result, error) {
 }
 
 // 在单连接上进行查询
-func singleQuery(dataSource DataSource, db, query string, queryResultChannel chan<- *queryResult, wg *sync.WaitGroup) {
+func singleQuery(dataSource DataSource, db, query string, queryResultChannel chan<- *queryResult, wg *sync.WaitGroup, decoratorConf *util.DecoratorConf) {
 	util.SugarLogger.Debugf("查询数据库：%s", db)
+
+	//执行SET命令
+	q := strings.Fields(strings.TrimSpace(query))
+	if strings.EqualFold(q[0], "set") {
+		util.SugarLogger.Debugf("执行SET命令：%s", query)
+		names := []string{"result of set command"}
+		values := []map[string]string{
+			{"result of set command": "ok"},
+		}
+		_, err := dataSource.Conn.DB.Exec(query)
+		if err != nil {
+			values = []map[string]string{
+				{"result of set command": fmt.Sprint(err.Error())},
+			}
+		}
+		queryResultChannel <- &queryResult{
+			db:     db,
+			names:  names,
+			values: values,
+			err:    nil,
+		}
+		return
+	}
+
 	//进行view替换
 	var err error
 	query, err = view.ReplaceViews(query, dataSource.Views)
@@ -162,6 +212,24 @@ func singleQuery(dataSource DataSource, db, query string, queryResultChannel cha
 		util.SugarLogger.Debugf("当前连接[%s]查询出来的结果是空集，跳过", db)
 		wg.Done()
 		return
+	}
+	if decoratorConf != nil {
+		lv := golua.NewLuaVM()
+		defer lv.L.Close()
+		lv.SetLuaPackagePath(util.Config.Server.LuaPackagePath)
+		ct := structs.NewCollectTable()
+		ct.Set(names, r)
+		tab := ct.ConvertToLuaTable()
+		fmt.Printf("ct: %#v", ct)
+		var values []lua.LValue
+		values, err = lv.ExecuteLuaScriptWithArgsAndMultiResult(decoratorConf.Path,
+			decoratorConf.Func, decoratorConf.NRet, tab, structs.ConvertStringMapToLuaTable(decoratorConf.Args))
+		var ok bool
+		if tab, ok = values[0].(*lua.LTable); ok {
+			ct.ConvertFromLuaTable(tab)
+			names = ct.GetNames()
+			r = ct.GetData()
+		}
 	}
 	//将查询的结果通过channel传递
 	queryResultChannel <- &queryResult{
