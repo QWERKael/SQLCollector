@@ -2,6 +2,7 @@ package main
 
 import (
 	"SQLCollector/handler"
+	"SQLCollector/structs"
 	"SQLCollector/util"
 	"github.com/go-mysql-org/go-mysql/server"
 	"net"
@@ -30,7 +31,7 @@ func main() {
 	//开始监听
 	l, _ := net.Listen("tcp", util.Config.Server.Addr)
 	util.SugarLogger.Infof("listening for %s", util.Config.Server.Addr)
-	whiteSet := util.NewSet(util.Config.Server.WhiteList)
+	whiteSet := structs.NewSet(util.Config.Server.WhiteList)
 	util.SugarLogger.Debugf("白名单列表：%s", whiteSet.ToStringList())
 	// user either the in-memory credential provider or the remote credential provider (you can implement your own)
 	//inMemProvider := server.NewInMemoryProvider()

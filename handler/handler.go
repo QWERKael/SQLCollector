@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"SQLCollector/structs"
 	"SQLCollector/util"
 	"SQLCollector/view"
 	"fmt"
@@ -75,25 +76,19 @@ func (h *Handler) UseDB(dbName string) error {
 }
 func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 	util.SugarLogger.Debugf("接受到的查询命令: %s\n", query)
+	var rs *mysql.Resultset = nil
+	var err error
+	names := make([]string, 0)
+	values := make([][]interface{}, 0)
 	switch query {
 	case "show databases":
 		fallthrough
 	case "show dbs":
-		values := make([][]interface{}, 0)
 		for _, connectName := range h.ConnectNames {
 			values = append(values, []interface{}{connectName})
 		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"connects"}, values)
-		if err != nil {
-			return nil, err
-		}
-		return &mysql.Result{
-			Status:       34,
-			Warnings:     0,
-			InsertId:     0,
-			AffectedRows: 0,
-			Resultset:    rs,
-		}, nil
+		names = []string{"connects"}
+		break
 	case "show groups":
 		fallthrough
 	case "show gps":
@@ -101,21 +96,11 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 		for _, group := range util.Config.Group {
 			values = append(values, []interface{}{group.Name, strings.Join(group.SourceList, ", ")})
 		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"group name", "source list"}, values)
-		if err != nil {
-			return nil, err
-		}
-		return &mysql.Result{
-			Status:       34,
-			Warnings:     0,
-			InsertId:     0,
-			AffectedRows: 0,
-			Resultset:    rs,
-		}, nil
-		fallthrough
+		names = []string{"group name", "source list"}
+		break
 	case "show views":
 		values := make([][]interface{}, 0)
-		using := util.NewSet(h.Connecting)
+		using := structs.NewSet(h.Connecting)
 		for _, sourceConf := range util.Config.Source {
 			if using.Exists(sourceConf.Name) {
 				for _, viewConf := range sourceConf.View {
@@ -123,30 +108,24 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 				}
 			}
 		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"source", "name", "description"}, values)
-		if err != nil {
-			return nil, err
-		}
-		return &mysql.Result{
-			Status:       34,
-			Warnings:     0,
-			InsertId:     0,
-			AffectedRows: 0,
-			Resultset:    rs,
-		}, nil
+		names = []string{"source", "name", "description"}
+		break
 	case "show using":
-		util.SugarLogger.Debugf("查看正在使用的数据源")
 		values := make([][]interface{}, 0)
 		for _, connectName := range h.Connecting {
 			values = append(values, []interface{}{connectName})
 		}
-		rs, err := mysql.BuildSimpleTextResultset([]string{"connecting"}, values)
-		if err != nil {
-			util.SugarLogger.Errorf("查看正在使用的数据源出现错误：%s", err.Error())
-			return nil, err
-		}
-		util.SugarLogger.Debugf("正在使用的数据源有：%s", strings.Join(h.Connecting, ", "))
-		util.SugarLogger.Debugf("%#v", rs)
+		names = []string{"connecting"}
+		break
+	}
+
+	if len(names) > 0 && len(values) > 0 {
+		rs, err = mysql.BuildSimpleTextResultset(names, values)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if rs != nil {
 		return &mysql.Result{
 			Status:       34,
 			Warnings:     0,
@@ -155,6 +134,7 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 			Resultset:    rs,
 		}, nil
 	}
+
 	return h.Query(query, util.WithSource)
 }
 
