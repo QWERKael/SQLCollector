@@ -92,14 +92,12 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 	case "show groups":
 		fallthrough
 	case "show gps":
-		values := make([][]interface{}, 0)
 		for _, group := range util.Config.Group {
 			values = append(values, []interface{}{group.Name, strings.Join(group.SourceList, ", ")})
 		}
 		names = []string{"group name", "source list"}
 		break
 	case "show views":
-		values := make([][]interface{}, 0)
 		using := structs.NewSet(h.Connecting)
 		for _, sourceConf := range util.Config.Source {
 			if using.Exists(sourceConf.Name) {
@@ -111,7 +109,6 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 		names = []string{"source", "name", "description"}
 		break
 	case "show using":
-		values := make([][]interface{}, 0)
 		for _, connectName := range h.Connecting {
 			values = append(values, []interface{}{connectName})
 		}
