@@ -16,5 +16,4 @@ require (
 	github.com/yuin/gopher-lua v0.0.0-20210529063254-f4c35e4016d9
 	go.uber.org/zap v1.20.0
 	golang.org/x/text v0.3.7 // indirect
-	layeh.com/gopher-luar v0.0.0-00010101000000-000000000000
 )

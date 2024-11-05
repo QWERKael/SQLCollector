@@ -74,7 +74,7 @@ func (h *Handler) UseDB(dbName string) error {
 	util.SugarLogger.Debugf("connecting db: %s", strings.Join(dbList, ", "))
 	return nil
 }
-func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
+func (h *Handler) HandleQuery(query string) (*mysql.Result, error) {
 	util.SugarLogger.Debugf("接受到的查询命令: %s\n", query)
 	var rs *mysql.Resultset = nil
 	var err error
@@ -135,21 +135,21 @@ func (h Handler) HandleQuery(query string) (*mysql.Result, error) {
 	return h.Query(query, util.WithSource)
 }
 
-func (h Handler) HandleFieldList(table string, fieldWildcard string) ([]*mysql.Field, error) {
+func (h *Handler) HandleFieldList(table string, fieldWildcard string) ([]*mysql.Field, error) {
 	return nil, fmt.Errorf("not supported now")
 }
-func (h Handler) HandleStmtPrepare(query string) (int, int, interface{}, error) {
+func (h *Handler) HandleStmtPrepare(query string) (int, int, interface{}, error) {
 	return 0, 0, nil, fmt.Errorf("not supported now")
 }
-func (h Handler) HandleStmtExecute(context interface{}, query string, args []interface{}) (*mysql.Result, error) {
+func (h *Handler) HandleStmtExecute(context interface{}, query string, args []interface{}) (*mysql.Result, error) {
 	return nil, fmt.Errorf("not supported now")
 }
 
-func (h Handler) HandleStmtClose(context interface{}) error {
+func (h *Handler) HandleStmtClose(context interface{}) error {
 	return nil
 }
 
-func (h Handler) HandleOtherCommand(cmd byte, data []byte) error {
+func (h *Handler) HandleOtherCommand(cmd byte, data []byte) error {
 	return mysql.NewError(
 		mysql.ER_UNKNOWN_ERROR,
 		fmt.Sprintf("command %d is not supported now", cmd),

@@ -46,6 +46,7 @@ func main() {
 		util.SugarLogger.Infof("接受到【%s】的连接", remoteAddr)
 		remoteIp := strings.Split(remoteAddr, ":")[0]
 		if !whiteSet.Exists(remoteIp) {
+			util.SugarLogger.Errorf("【%s】不在白名单中，拒绝连接", remoteIp)
 			c.Close()
 			continue
 		}
